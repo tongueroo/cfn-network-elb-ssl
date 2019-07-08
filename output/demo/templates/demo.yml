@@ -1,0 +1,188 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Demo stack
+Parameters:
+  InstanceType:
+    Default: t3.micro
+    Type: String
+  KeyName:
+    Default: ''
+    Type: String
+  Subnets:
+    Type: String
+  VpcId:
+    Type: String
+  CertArn:
+    Type: String
+  DnsName:
+    Type: String
+  HostedZoneName:
+    Type: String
+Conditions:
+  HasKeyName:
+    Fn::Not:
+    - Fn::Equals:
+      - Ref: KeyName
+      - ''
+Mappings:
+  AmiMap:
+    ap-northeast-1:
+      Ami: ami-0f9ae750e8274075b
+    ap-northeast-2:
+      Ami: ami-047f7b46bd6dd5d84
+    ap-south-1:
+      Ami: ami-0889b8a448de4fc44
+    ap-southeast-1:
+      Ami: ami-0b419c3a4b01d1859
+    ap-southeast-2:
+      Ami: ami-04481c741a0311bbb
+    ca-central-1:
+      Ami: ami-03338e1f67dae0168
+    eu-central-1:
+      Ami: ami-09def150731bdbcc2
+    eu-north-1:
+      Ami: ami-d16fe6af
+    eu-west-1:
+      Ami: ami-07683a44e80cd32c5
+    eu-west-2:
+      Ami: ami-09ead922c1dad67e4
+    eu-west-3:
+      Ami: ami-0451ae4fd8dd178f7
+    sa-east-1:
+      Ami: ami-0669a96e355eac82f
+    us-east-1:
+      Ami: ami-0de53d8956e8dcf80
+    us-east-2:
+      Ami: ami-02bcbb802e03574ba
+    us-west-1:
+      Ami: ami-0019ef04ac50be30f
+    us-west-2:
+      Ami: ami-061392db613a6357b
+Resources:
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType:
+        Ref: InstanceType
+      ImageId:
+        Fn::FindInMap:
+        - AmiMap
+        - Ref: AWS::Region
+        - Ami
+      SecurityGroupIds:
+      - Fn::GetAtt:
+        - InstanceSecurityGroup
+        - GroupId
+      SubnetId:
+        Fn::Select:
+        - '0'
+        - Fn::Split:
+          - ","
+          - Ref: Subnets
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          yum install -y httpd
+          echo "hello world" > /var/www/html/index.html
+          echo "test" > /var/www/html/test.html
+          service httpd start
+      KeyName:
+        Fn::If:
+        - HasKeyName
+        - Ref: KeyName
+        - Ref: AWS::NoValue
+      Tags:
+      - Key: Name
+        Value: demo
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: instance security group
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+  Elb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn: Instance
+    Properties:
+      Type: network
+      Subnets:
+        Fn::Split:
+        - ","
+        - Ref: Subnets
+  ElbTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Protocol: TCP
+      Port: 80
+      VpcId:
+        Ref: VpcId
+      Targets:
+      - Id:
+          Ref: Instance
+        Port: 80
+  ElbListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn:
+        Ref: Elb
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: ElbTargetGroup
+      Protocol: TCP
+      Port: 80
+  ElbListenerSsl:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn:
+        Ref: Elb
+      Certificates:
+      - CertificateArn:
+          Ref: CertArn
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: ElbTargetGroup
+      Protocol: TLS
+      Port: 443
+  Domain:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      Type: CNAME
+      TTL: '60'
+      Name:
+        Ref: DnsName
+      HostedZoneName:
+        Ref: HostedZoneName
+      ResourceRecords:
+      - Fn::GetAtt:
+        - Elb
+        - DNSName
+Outputs:
+  Instance:
+    Value:
+      Ref: Instance
+  InstanceIp:
+    Value:
+      Fn::GetAtt:
+      - Instance
+      - PublicIp
+  Elb:
+    Value:
+      Fn::GetAtt:
+      - Elb
+      - DNSName
+  Domain:
+    Value:
+      Ref: Domain
